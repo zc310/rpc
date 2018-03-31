@@ -7,9 +7,9 @@ package rpc
 
 import (
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
+	"github.com/valyala/fasthttp"
 )
 
 // ----------------------------------------------------------------------------
@@ -18,7 +18,7 @@ import (
 
 // Codec creates a CodecRequest to process each request.
 type Codec interface {
-	NewRequest(*http.Request) CodecRequest
+	NewRequest(ctx *fasthttp.RequestCtx) CodecRequest
 }
 
 // CodecRequest decodes a request and encodes a response using a specific
@@ -29,9 +29,9 @@ type CodecRequest interface {
 	// Reads the request filling the RPC method args.
 	ReadRequest(interface{}) error
 	// Writes the response using the RPC method reply.
-	WriteResponse(http.ResponseWriter, interface{})
+	WriteResponse(*fasthttp.RequestCtx, interface{})
 	// Writes an error produced by the server.
-	WriteError(w http.ResponseWriter, status int, err error)
+	WriteError(w *fasthttp.RequestCtx, status int, err error)
 }
 
 // ----------------------------------------------------------------------------
@@ -92,12 +92,12 @@ func (s *Server) HasMethod(method string) bool {
 }
 
 // ServeHTTP
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		WriteError(w, 405, "rpc: POST method required, received "+r.Method)
+func (s *Server) Handler(ctx *fasthttp.RequestCtx) {
+	if string(ctx.Method()) != "POST" {
+		WriteError(ctx, 405, "rpc: POST method required, received "+string(ctx.Method()))
 		return
 	}
-	contentType := r.Header.Get("Content-Type")
+	contentType := string(ctx.Request.Header.Peek("Content-Type"))
 	idx := strings.Index(contentType, ";")
 	if idx != -1 {
 		contentType = contentType[:idx]
@@ -110,33 +110,33 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			codec = c
 		}
 	} else if codec = s.codecs[strings.ToLower(contentType)]; codec == nil {
-		WriteError(w, 415, "rpc: unrecognized Content-Type: "+contentType)
+		WriteError(ctx, 415, "rpc: unrecognized Content-Type: "+contentType)
 		return
 	}
 	// Create a new codec request.
-	codecReq := codec.NewRequest(r)
+	codecReq := codec.NewRequest(ctx)
 	// Get service method to be called.
 	method, errMethod := codecReq.Method()
 	if errMethod != nil {
-		codecReq.WriteError(w, 400, errMethod)
+		codecReq.WriteError(ctx, 400, errMethod)
 		return
 	}
 	serviceSpec, methodSpec, errGet := s.services.get(method)
 	if errGet != nil {
-		codecReq.WriteError(w, 400, errGet)
+		codecReq.WriteError(ctx, 400, errGet)
 		return
 	}
 	// Decode the args.
 	args := reflect.New(methodSpec.argsType)
 	if errRead := codecReq.ReadRequest(args.Interface()); errRead != nil {
-		codecReq.WriteError(w, 400, errRead)
+		codecReq.WriteError(ctx, 400, errRead)
 		return
 	}
 	// Call the service method.
 	reply := reflect.New(methodSpec.replyType)
 	errValue := methodSpec.method.Func.Call([]reflect.Value{
 		serviceSpec.rcvr,
-		reflect.ValueOf(r),
+		reflect.ValueOf(ctx),
 		args,
 		reply,
 	})
@@ -148,17 +148,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Prevents Internet Explorer from MIME-sniffing a response away
 	// from the declared content-type
-	w.Header().Set("x-content-type-options", "nosniff")
+	ctx.Response.Header.Set("x-content-type-options", "nosniff")
 	// Encode the response.
 	if errResult == nil {
-		codecReq.WriteResponse(w, reply.Interface())
+		codecReq.WriteResponse(ctx, reply.Interface())
 	} else {
-		codecReq.WriteError(w, 400, errResult)
+		codecReq.WriteError(ctx, 400, errResult)
 	}
 }
 
-func WriteError(w http.ResponseWriter, status int, msg string) {
-	w.WriteHeader(status)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprint(w, msg)
+func WriteError(w *fasthttp.RequestCtx, status int, msg string) {
+	w.Response.SetStatusCode(status)
+	w.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprint(w.Response.BodyWriter(), msg)
 }

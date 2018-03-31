@@ -7,18 +7,18 @@ package rpc
 
 import (
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
+	"github.com/valyala/fasthttp"
 )
 
 var (
 	// Precompute the reflect.Type of error and http.Request
 	typeOfError   = reflect.TypeOf((*error)(nil)).Elem()
-	typeOfRequest = reflect.TypeOf((*http.Request)(nil)).Elem()
+	typeOfRequest = reflect.TypeOf((*fasthttp.RequestCtx)(nil)).Elem()
 )
 
 // ----------------------------------------------------------------------------

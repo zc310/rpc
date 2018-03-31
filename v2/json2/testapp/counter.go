@@ -8,10 +8,9 @@ package main
 import (
 	"flag"
 	"log"
-	"net/http"
-
-	"github.com/gorilla/rpc/v2"
-	"github.com/gorilla/rpc/v2/json2"
+	"github.com/valyala/fasthttp"
+	"github.com/zc310/rpc/v2"
+	"github.com/zc310/rpc/v2/json2"
 )
 
 type Counter struct {
@@ -23,7 +22,7 @@ type IncrReq struct {
 }
 
 // Notification.
-func (c *Counter) Incr(r *http.Request, req *IncrReq, res *json2.EmptyResponse) error {
+func (c *Counter) Incr(r *fasthttp.RequestCtx, req *IncrReq, res *json2.EmptyResponse) error {
 	log.Printf("<- Incr %+v", *req)
 	c.Count += req.Delta
 	return nil
@@ -32,7 +31,7 @@ func (c *Counter) Incr(r *http.Request, req *IncrReq, res *json2.EmptyResponse) 
 type GetReq struct {
 }
 
-func (c *Counter) Get(r *http.Request, req *GetReq, res *Counter) error {
+func (c *Counter) Get(r *fasthttp.RequestCtx, req *GetReq, res *Counter) error {
 	log.Printf("<- Get %+v", *req)
 	*res = *c
 	log.Printf("-> %v", *res)
@@ -41,10 +40,29 @@ func (c *Counter) Get(r *http.Request, req *GetReq, res *Counter) error {
 
 func main() {
 	address := flag.String("address", ":65534", "")
+
 	s := rpc.NewServer()
 	s.RegisterCodec(json2.NewCustomCodec(&rpc.CompressionSelector{}), "application/json")
 	s.RegisterService(new(Counter), "")
-	http.Handle("/", http.StripPrefix("/", http.FileServer(http.Dir("./"))))
-	http.Handle("/jsonrpc/", s)
-	log.Fatal(http.ListenAndServe(*address, nil))
+
+	fs := &fasthttp.FS{
+		Root:               "./",
+		IndexNames:         []string{"index.html"},
+		GenerateIndexPages: false,
+		Compress:           true,
+		AcceptByteRange:    true,
+	}
+	fsHandler := fs.NewRequestHandler()
+
+	requestHandler := func(ctx *fasthttp.RequestCtx) {
+		switch string(ctx.Path()) {
+		case "/jsonrpc/":
+			s.Handler(ctx)
+		default:
+			fsHandler(ctx)
+
+		}
+	}
+	log.Fatal(fasthttp.ListenAndServe(*address, requestHandler))
+
 }

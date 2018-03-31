@@ -9,9 +9,9 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"io"
-	"net/http"
 	"strings"
 	"unicode"
+	"github.com/valyala/fasthttp"
 )
 
 // gzipWriter writes and closes the gzip writer.
@@ -28,9 +28,9 @@ func (gw *gzipWriter) Write(p []byte) (n int, err error) {
 type gzipEncoder struct {
 }
 
-func (enc *gzipEncoder) Encode(w http.ResponseWriter) io.Writer {
-	w.Header().Set("Content-Encoding", "gzip")
-	return &gzipWriter{gzip.NewWriter(w)}
+func (enc *gzipEncoder) Encode(ctx *fasthttp.RequestCtx) io.Writer {
+	ctx.Response.Header.Set("Content-Encoding", "gzip")
+	return &gzipWriter{gzip.NewWriter(ctx)}
 }
 
 // flateWriter writes and closes the flate writer.
@@ -47,12 +47,12 @@ func (fw *flateWriter) Write(p []byte) (n int, err error) {
 type flateEncoder struct {
 }
 
-func (enc *flateEncoder) Encode(w http.ResponseWriter) io.Writer {
-	fw, err := flate.NewWriter(w, flate.DefaultCompression)
+func (enc *flateEncoder) Encode(ctx *fasthttp.RequestCtx) io.Writer {
+	fw, err := flate.NewWriter(ctx, flate.DefaultCompression)
 	if err != nil {
-		return w
+		return ctx.Response.BodyWriter()
 	}
-	w.Header().Set("Content-Encoding", "deflate")
+	ctx.Response.Header.Set("Content-Encoding", "deflate")
 	return &flateWriter{fw}
 }
 
@@ -62,8 +62,8 @@ type CompressionSelector struct {
 
 // acceptedEnc returns the first compression type in "Accept-Encoding" header
 // field of the request.
-func acceptedEnc(req *http.Request) string {
-	encHeader := req.Header.Get("Accept-Encoding")
+func acceptedEnc(ctx *fasthttp.RequestCtx) string {
+	encHeader := string(ctx.Request.Header.Peek("Accept-Encoding"))
 	if encHeader == "" {
 		return ""
 	}
@@ -79,7 +79,7 @@ func acceptedEnc(req *http.Request) string {
 }
 
 // Select method selects the correct compression encoder based on http HEADER.
-func (_ *CompressionSelector) Select(r *http.Request) Encoder {
+func (_ *CompressionSelector) Select(r *fasthttp.RequestCtx) Encoder {
 	switch acceptedEnc(r) {
 	case "gzip":
 		return &gzipEncoder{}

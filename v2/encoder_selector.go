@@ -7,19 +7,20 @@ package rpc
 
 import (
 	"io"
-	"net/http"
+
+	"github.com/valyala/fasthttp"
 )
 
 // Encoder interface contains the encoder for http response.
 // Eg. gzip, flate compressions.
 type Encoder interface {
-	Encode(w http.ResponseWriter) io.Writer
+	Encode(w *fasthttp.RequestCtx) io.Writer
 }
 
 type encoder struct {
 }
 
-func (_ *encoder) Encode(w http.ResponseWriter) io.Writer {
+func (_ *encoder) Encode(w *fasthttp.RequestCtx) io.Writer {
 	return w
 }
 
@@ -30,13 +31,13 @@ var DefaultEncoder = &encoder{}
 // figure out client capabilities.
 // Eg. "Accept-Encoding" tells about supported compressions.
 type EncoderSelector interface {
-	Select(r *http.Request) Encoder
+	Select(r *fasthttp.RequestCtx) Encoder
 }
 
 type encoderSelector struct {
 }
 
-func (_ *encoderSelector) Select(_ *http.Request) Encoder {
+func (_ *encoderSelector) Select(_ *fasthttp.RequestCtx) Encoder {
 	return DefaultEncoder
 }
 
